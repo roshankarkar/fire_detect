@@ -10,7 +10,7 @@ def play_sound(file_path):
     pygame.mixer.music.load(file_path)
     pygame.mixer.music.play()
 
-# Function to detect fire based on motion
+# Function to detect fire based on motion, color, and flickering behavior
 def detect_fire_by_motion(frame, prev_frame):
     if prev_frame is None:
         return False, None
@@ -23,10 +23,10 @@ def detect_fire_by_motion(frame, prev_frame):
     diff = cv2.absdiff(gray_prev_frame, gray_frame)
 
     # Apply a threshold to the difference to identify significant motion
-    _, thresh = cv2.threshold(diff, 20, 255, cv2.THRESH_BINARY)  # Lowered threshold for more sensitivity
+    _, thresh = cv2.threshold(diff, 30, 255, cv2.THRESH_BINARY)
 
     # Perform morphological operations to remove noise
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))  # Smaller kernel for distant fire
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
 
     # Find contours in the thresholded image
@@ -37,27 +37,31 @@ def detect_fire_by_motion(frame, prev_frame):
         area = cv2.contourArea(contour)
 
         # Filter out small regions that are unlikely to be fire
-        if area > 200:  # Lowered area threshold for distant fire
+        if area > 500:  # Increased minimum area to reduce false positives
             # Calculate the bounding box of the contour
             x, y, w, h = cv2.boundingRect(contour)
 
-            # Check if the region has a fire-like shape (e.g., tall and narrow)
-            aspect_ratio = h / float(w)
-            if aspect_ratio > 1.1:  # Lowered aspect ratio for distant fire
-                # Analyze the intensity of motion in the region
-                roi_diff = diff[y:y+h, x:x+w]
-                motion_intensity = np.sum(roi_diff) / 255  # Count the number of white pixels
+            # Extract the region of interest (ROI) from the original frame
+            roi = frame[y:y+h, x:x+w]
 
-                # Print debugging information
-                print(f"Area: {area}, Aspect Ratio: {aspect_ratio}, Motion Intensity: {motion_intensity}")
+            # Convert the ROI to HSV color space
+            hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
 
-                # Fire motion typically has a high intensity and irregular shape
-                if motion_intensity > 100:  # Lowered motion intensity threshold for distant fire
-                    # Check for irregularity in the contour shape (fire is not perfectly rectangular)
-                    perimeter = cv2.arcLength(contour, True)
-                    circularity = 4 * np.pi * (area / (perimeter * perimeter))
-                    if 0.4 < circularity < 1.6:  # Adjusted circularity range for distant fire
-                        return True, (x, y, w, h)
+            # Define the range of fire-like colors in HSV
+            lower_fire = np.array([0, 50, 200])  # Stricter lower bound
+            upper_fire = np.array([35, 255, 255])  # Stricter upper bound
+
+            # Create a mask for fire-like colors
+            mask = cv2.inRange(hsv_roi, lower_fire, upper_fire)
+
+            # Calculate the percentage of fire-like pixels in the ROI
+            fire_pixels = cv2.countNonZero(mask)
+            total_pixels = roi.shape[0] * roi.shape[1]
+            fire_ratio = fire_pixels / total_pixels
+
+            # Check for flickering behavior (optional: track over time)
+            if fire_ratio > 0.4:  # Increased threshold for fire-like color ratio
+                return True, (x, y, w, h)
 
     return False, None
 
@@ -75,10 +79,11 @@ while True:
     # Flip the frame horizontally for a mirror effect
     frame = cv2.flip(frame, 1)
 
-    # Detect fire based on motion
+    # Detect fire based on motion and color
     is_fire_detected, fire_region = detect_fire_by_motion(frame, prev_frame)
     if is_fire_detected:
         x, y, w, h = fire_region
+        # Draw a rectangle only around the detected fire region
         cv2.putText(frame, "FIRE FIRE FIRE! RUN FROM HERE!", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
         cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 2)  # Draw a rectangle around the fire region
         if not fire_detected:
